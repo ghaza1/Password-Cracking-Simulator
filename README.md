@@ -16,7 +16,6 @@
 
 ## 📸 Screenshots  
 <p align="center">
-    ![image]()
     <p align="center"> <img src="https://github.com/user-attachments/assets/310e551c-f1af-4a02-a339-1a05466384a3" alt="Screenshot Placeholder"> </p>
 
 </p>  
