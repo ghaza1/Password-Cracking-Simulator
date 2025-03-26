@@ -1,434 +1,198 @@
-import os
-import datetime
-from flask import Flask, jsonify, request
-from flask_sqlalchemy import SQLAlchemy ;from sqlalchemy.exc import IntegrityError
-from flask_jwt_extended import JWTManager, jwt_required, create_access_token, get_jwt_identity, get_jwt
-from flask_bcrypt import Bcrypt
-import functools
-from datetime import timedelta,timezone
-from dotenv import load_dotenv
+import tkinter as tk
+from tkinter import messagebox, filedialog, ttk
+import itertools
+import string
+import threading
 
-load_dotenv()
+class PasswordCrackerApp:
+    def __init__(self, master):
+        # Window Setup
+        self.master = master
+        master.title("Password Cracking Simulator")
+        master.geometry("500x600")
+        master.configure(bg='#f0f0f0')
 
-# Initialize Flask app
-app = Flask(__name__)
+        # Username Section
+        username_frame = tk.Frame(master, bg='#f0f0f0')
+        username_frame.pack(fill=tk.X, padx=10, pady=5)
+        tk.Label(username_frame, text="Username:", bg='#f0f0f0').pack(side=tk.LEFT)
+        self.username_entry = tk.Entry(username_frame, width=30)
+        self.username_entry.pack(side=tk.LEFT, padx=10)
 
-# Configuration
-app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'ahmed')
-app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get('DATABASE_URI', 'mysql://root:@localhost/infosec')
+        # Dictionary Attack Section
+        dict_frame = tk.Frame(master, bg='#f0f0f0')
+        dict_frame.pack(fill=tk.X, padx=10, pady=5)
+        tk.Label(dict_frame, text="Dictionary File:", bg='#f0f0f0').pack(side=tk.LEFT)
+        self.dict_file_entry = tk.Entry(dict_frame, width=30)
+        self.dict_file_entry.pack(side=tk.LEFT, padx=10)
+        
+        dict_browse_btn = tk.Button(dict_frame, text="Browse", command=self.browse_dictionary)
+        dict_browse_btn.pack(side=tk.LEFT)
 
-app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
-app.config['JWT_SECRET_KEY'] = os.environ.get('JWT_SECRET_KEY', 'ahmed@1234')
-app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(minutes=10)
-app.config['JWT_TOKEN_LOCATION'] = ['headers']
-app.config['JWT_IDENTITY_CLAIM'] = 'sub'
+        # Brute Force Configuration
+        brute_frame = tk.Frame(master, bg='#f0f0f0')
+        brute_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        tk.Label(brute_frame, text="Character Set:", bg='#f0f0f0').pack(side=tk.LEFT)
+        self.char_set_var = tk.StringVar(value="All Letters")
+        char_sets = ["All Letters", "Lowercase", "Uppercase", "Alphanumeric"]
+        char_set_dropdown = tk.OptionMenu(brute_frame, self.char_set_var, *char_sets)
+        char_set_dropdown.pack(side=tk.LEFT, padx=10)
 
-# Initialize extensions
-db = SQLAlchemy(app)
-jwt = JWTManager(app)
-bcrypt = Bcrypt(app)
+        tk.Label(brute_frame, text="Max Length:", bg='#f0f0f0').pack(side=tk.LEFT)
+        self.max_length_var = tk.IntVar(value=5)
+        max_length_spinner = tk.Spinbox(brute_frame, from_=1, to=10, 
+                                         textvariable=self.max_length_var, width=5)
+        max_length_spinner.pack(side=tk.LEFT, padx=10)
 
-# JWT Token blocklist
-class TokenBlocklist(db.Model):
-    id = db.Column(db.Integer, primary_key=True)
-    jti = db.Column(db.String(36), nullable=False, index=True)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.datetime.now(timezone.utc))
+        # Action Buttons
+        btn_frame = tk.Frame(master, bg='#f0f0f0')
+        btn_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        dict_attack_btn = tk.Button(btn_frame, text="Dictionary Attack", 
+                                    command=self.start_dictionary_attack)
+        dict_attack_btn.pack(side=tk.LEFT, padx=5)
+        
+        brute_attack_btn = tk.Button(btn_frame, text="Brute Force Attack", 
+                                     command=self.start_brute_force_attack)
+        brute_attack_btn.pack(side=tk.LEFT, padx=5)
 
-# Check if token is in blocklist
-@jwt.token_in_blocklist_loader
-def check_if_token_revoked(jwt_header, jwt_payload):
-    jti = jwt_payload["jti"]
-    token = db.session.query(TokenBlocklist).filter_by(jti=jti).first()
-    return token is not None
+        # Progress Bar
+        progress_frame = tk.Frame(master, bg='#f0f0f0')
+        progress_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        self.progress_var = tk.DoubleVar()
+        self.progress_bar = tk.ttk.Progressbar(progress_frame, 
+                                                variable=self.progress_var, 
+                                                maximum=100, 
+                                                length=400)
+        self.progress_bar.pack(side=tk.TOP, pady=5)
+        
+        # Results Area
+        result_frame = tk.Frame(master, bg='#f0f0f0')
+        result_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        
+        self.result_text = tk.Text(result_frame, height=10, width=60)
+        self.result_text.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
 
-# Models
-class User(db.Model):
-    __tablename__ = 'users'
-    
-    id = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    name = db.Column(db.String(100), nullable=False)
-    username = db.Column(db.String(50), unique=True, nullable=False)
-    password = db.Column(db.String(255), nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.datetime.now(timezone.utc))
-    updated_at = db.Column(db.DateTime, onupdate=datetime.datetime.now(timezone.utc))
-    
-    def __init__(self, name, username, password):
-        self.name = name
-        self.username = username
-        self.password = bcrypt.generate_password_hash(password).decode('utf-8')
-    
-    def check_password(self, password):
-        return bcrypt.check_password_hash(self.password, password)
-    
-    def to_dict(self):
-        return {
-            'id': self.id,
-            'name': self.name,
-            'username': self.username,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+    def browse_dictionary(self):
+        filename = filedialog.askopenfilename(title="Select Dictionary File")
+        self.dict_file_entry.delete(0, tk.END)
+        self.dict_file_entry.insert(0, filename)
+
+    def start_dictionary_attack(self):
+        # Reset UI
+        self.result_text.delete(1.0, tk.END)
+        self.progress_var.set(0)
+        
+        # Get inputs
+        username = self.username_entry.get()
+        dict_file = self.dict_file_entry.get()
+        
+        # Validate inputs
+        if not username or not dict_file:
+            messagebox.showerror("Error", "Please enter username and select dictionary file")
+            return
+        
+        # Start attack in a separate thread
+        threading.Thread(target=self.dictionary_attack, 
+                         args=(username, dict_file), 
+                         daemon=True).start()
+
+    def dictionary_attack(self, username, dict_file):
+        try:
+            with open(dict_file, 'r') as file:
+                passwords = file.readlines()
+                total = len(passwords)
+                
+                for i, password in enumerate(passwords):
+                    password = password.strip()
+                    
+                    # Update progress
+                    progress = (i / total) * 100
+                    self.progress_var.set(progress)
+                    
+                    # Check login
+                    if self.attempt_login(username, password):
+                        self.master.after(0, self.show_result, 
+                                          f"Dictionary Attack Successful!\nPassword: {password}")
+                        return
+            
+            # If no password found
+            self.master.after(0, self.show_result, "Dictionary Attack Failed. No password found.")
+        
+        except FileNotFoundError:
+            self.master.after(0, self.show_result, f"Error: Dictionary file {dict_file} not found.")
+        except Exception as e:
+            self.master.after(0, self.show_result, f"Error: {str(e)}")
+
+    def start_brute_force_attack(self):
+        # Reset UI
+        self.result_text.delete(1.0, tk.END)
+        self.progress_var.set(0)
+        
+        # Get inputs
+        username = self.username_entry.get()
+        
+        # Validate inputs
+        if not username:
+            messagebox.showerror("Error", "Please enter username")
+            return
+        
+        # Start attack in a separate thread
+        threading.Thread(target=self.brute_force_attack, 
+                         args=(username,), 
+                         daemon=True).start()
+
+    def brute_force_attack(self, username):
+        # Determine character set
+        char_set_map = {
+            "All Letters": string.ascii_letters,
+            "Lowercase": string.ascii_lowercase,
+            "Uppercase": string.ascii_uppercase,
+            "Alphanumeric": string.ascii_letters + string.digits
         }
+        characters = char_set_map[self.char_set_var.get()]
+        max_length = self.max_length_var.get()
 
-class Product(db.Model):
-    __tablename__ = 'products'
-    
-    pid = db.Column(db.Integer, primary_key=True, autoincrement=True)
-    pname = db.Column(db.String(100), nullable=False)
-    description = db.Column(db.Text, nullable=True)
-    price = db.Column(db.Float, nullable=False)
-    stock = db.Column(db.Integer, nullable=False)
-    created_at = db.Column(db.DateTime, default=datetime.datetime.now(timezone.utc))
-    updated_at = db.Column(db.DateTime, onupdate=datetime.datetime.now(timezone.utc))
-    
-    def to_dict(self):
-        return {
-            'pid': self.pid,
-            'pname': self.pname,
-            'description': self.description,
-            'price': self.price,
-            'stock': self.stock,
-            'created_at': self.created_at.isoformat() if self.created_at else None,
-            'updated_at': self.updated_at.isoformat() if self.updated_at else None
-        }
-
-# Create tables
-with app.app_context():
-    db.create_all()
-
-# Authentication helper functions
-def login_user():
-    data = request.get_json()
-    
-    if not data or not data.get('username') or not data.get('password'):
-        return jsonify({'status': 'error', 'message': 'Missing username or password'}), 400
-    
-    username = data.get('username')
-    password = data.get('password')
-    
-    user = User.query.filter_by(username=username).first()
-    
-    if not user or not user.check_password(password):
-        return jsonify({'status': 'error', 'message': 'Invalid username or password'}), 401
-    
-    # Generate JWT token valid for 10 minutes
-    access_token = create_access_token(
-        identity=user.id,
-        additional_claims={"username": user.username}
-    )
-    
-    return jsonify({
-            'token': access_token,
-        }
-    ), 200
-
-def signup_user():
-    data = request.get_json()
-    
-    if not data:
-        return jsonify({'status': 'error', 'message': 'No input data provided'}), 400
-    
-    # Validate required fields
-    for field in ['name', 'username', 'password']:
-        if field not in data:
-            return jsonify({'status': 'error', 'message': f'Missing {field}'}), 400
-    
-    try:
-        # Create new user
-        new_user = User(
-            name=data['name'],
-            username=data['username'],
-            password=data['password']
-        )
+        # Total combinations calculation
+        total_combinations = sum(len(characters)**l for l in range(1, max_length+1))
         
-        db.session.add(new_user)
-        db.session.commit()
+        # Iterate through combinations
+        current_attempt = 0
+        for length in range(1, max_length+1):
+            for password in itertools.product(characters, repeat=length):
+                password = ''.join(password)
+                
+                # Update progress
+                current_attempt += 1
+                progress = (current_attempt / total_combinations) * 100
+                self.progress_var.set(min(progress, 100))
+                
+                # Attempt login
+                if self.attempt_login(username, password):
+                    self.master.after(0, self.show_result, 
+                                      f"Brute Force Attack Successful!\nPassword: {password}")
+                    return
         
-        return jsonify({
-            'status': 'success', 
-            'message': 'User created successfully', 
-            'data': {'user': new_user.to_dict()}
-        }), 201
-    
-    except IntegrityError:
-        db.session.rollback()
-        return jsonify({
-            'status': 'error', 
-            'message': 'Username already exists'
-        }), 409
-    
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({
-            'status': 'error', 
-            'message': f'An error occurred: {str(e)}'
-        }), 500
+        # If no password found
+        self.master.after(0, self.show_result, "Brute Force Attack Failed. No password found.")
 
-# Custom decorator for checking user permissions
-def user_required(f):
-    @functools.wraps(f)
-    @jwt_required()
-    def decorated_function(*args, **kwargs):
-        current_user_id = get_jwt_identity()
-        user_id = kwargs.get('id')
-        
-        # Convert to int for comparison
-        if int(user_id) != int(current_user_id):
-            return jsonify({
-                'status': 'error', 
-                'message': 'Unauthorized access'
-            }), 403
-        
-        return f(*args, **kwargs)
-    
-    return decorated_function
+    def attempt_login(self, username, password):
+        # Simulated login - replace with actual authentication logic
+        test_username = "admin"
+        test_password = "hello"
+        return username == test_username and password == test_password
 
-# Routes
-# Authentication routes
-@app.route('/signup', methods=['POST'])
-def signup():
-    return signup_user()
+    def show_result(self, message):
+        # Update result text and reset progress
+        self.result_text.insert(tk.END, message + "\n")
+        self.progress_var.set(0)
 
-@app.route('/login', methods=['POST'])
-def login():
-    return login_user()
+def main():
+    root = tk.Tk()
+    PasswordCrackerApp(root)
+    root.mainloop()
 
-@app.route('/logout', methods=['POST'])
-@jwt_required()
-def logout():
-    jti = get_jwt()["jti"]
-    now = datetime.datetime.now(timezone.utc)
-    
-    # Add token to blocklist
-    db.session.add(TokenBlocklist(jti=jti, created_at=now))
-    db.session.commit()
-    
-    return jsonify({
-        'status': 'success',
-        'message': 'Successfully logged out'
-    }), 200
-
-# User operations
-@app.route('/users/<int:id>', methods=['PUT'])
-@user_required
-def update_user(id):
-    user = User.query.get_or_404(id)
-    data = request.get_json()
-    
-    if not data:
-        return jsonify({
-            'status': 'error',
-            'message': 'No input data provided'
-        }), 400
-    
-    try:
-        # Update user details
-        if 'name' in data:
-            user.name = data['name']
-        if 'password' in data:
-            user.password = bcrypt.generate_password_hash(data['password']).decode('utf-8')
-        
-        db.session.commit()
-        
-        return jsonify({
-            'status': 'success',
-            'message': 'User updated successfully',
-            'data': {'user': user.to_dict()}
-        }), 200
-    
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({
-            'status': 'error',
-            'message': f'An error occurred: {str(e)}'
-        }), 500
-
-# Product operations
-@app.route('/products', methods=['POST'])
-@jwt_required()
-def add_product():
-    data = request.get_json()
-    
-    if not data:
-        return jsonify({
-            'status': 'error',
-            'message': 'No input data provided'
-        }), 400
-    
-    # Validate required fields
-    for field in ['pname', 'price', 'stock']:
-        if field not in data:
-            return jsonify({
-                'status': 'error',
-                'message': f'Missing {field}'
-            }), 400
-    
-    try:
-        # Create new product
-        new_product = Product(
-            pname=data['pname'],
-            description=data.get('description', ''),
-            price=float(data['price']),
-            stock=int(data['stock'])
-        )
-        
-        db.session.add(new_product)
-        db.session.commit()
-        
-        return jsonify({
-           'message': 'Product created successfully',
-        }), 201
-    
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({
-            'status': 'error',
-            'message': f'An error occurred: {str(e)}'
-        }), 500
-
-@app.route('/products', methods=['GET'])
-@jwt_required()
-def get_products():
-    try:
-        # Add pagination
-        page = request.args.get('page', 1, type=int)
-        per_page = request.args.get('per_page', 10, type=int)
-        
-        pagination = Product.query.paginate(page=page, per_page=per_page)
-        products = pagination.items
-        
-        return jsonify({
-        
-                'products': [product.to_dict() for product in products],
-                'pagination': {
-                    'total': pagination.total,
-                    'pages': pagination.pages,
-                    'page': page,
-                    'per_page': per_page,
-                    'next': pagination.next_num,
-                    'prev': pagination.prev_num
-                }
-            }
-        ), 200
-    
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': f'An error occurred: {str(e)}'
-        }), 500
-
-@app.route('/products/<int:pid>', methods=['GET'])
-@jwt_required()
-def get_product(pid):
-    try:
-        product = Product.query.get_or_404(pid)
-        
-        return jsonify({
-            'product': product.to_dict()
-        }), 200
-    
-    except Exception as e:
-        return jsonify({
-            'status': 'error',
-            'message': f'An error occurred: {str(e)}'
-        }), 500
-
-@app.route('/products/<int:pid>', methods=['PUT'])
-@jwt_required()
-def update_product(pid):
-    product = Product.query.get_or_404(pid)
-    data = request.get_json()
-    
-    if not data:
-        return jsonify({
-            'status': 'error',
-            'message': 'No input data provided'
-        }), 400
-    
-    try:
-        # Update product details
-        if 'pname' in data:
-            product.pname = data['pname']
-        if 'description' in data:
-            product.description = data['description']
-        if 'price' in data:
-            product.price = float(data['price'])
-        if 'stock' in data:
-            product.stock = int(data['stock'])
-        
-        db.session.commit()
-        
-        return jsonify({
-            'message': 'Product updated successfully',
-            'product': product.to_dict()
-        }), 200
-    
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({
-            'status': 'error',
-            'message': f'An error occurred: {str(e)}'
-        }), 500
-
-@app.route('/products/<int:pid>', methods=['DELETE'])
-@jwt_required()
-def delete_product(pid):
-    try:
-        product = Product.query.get_or_404(pid)
-        
-        db.session.delete(product)
-        db.session.commit()
-        
-        return jsonify({
-            'status': 'success',
-            'message': 'Product deleted successfully'
-        }), 200
-    
-    except Exception as e:
-        db.session.rollback()
-        return jsonify({
-            'status': 'error',
-            'message': f'An error occurred: {str(e)}'
-        }), 500
-
-# Error handlers
-@app.errorhandler(404)
-def not_found(e):
-    return jsonify({
-        'status': 'error',
-        'message': 'Resource not found'
-    }), 404
-
-@app.errorhandler(500)
-def internal_server_error(e):
-    return jsonify({
-        'status': 'error',
-        'message': 'Internal server error'
-    }), 500
-
-@jwt.expired_token_loader
-def expired_token_callback(jwt_header, jwt_payload):
-    return jsonify({
-        'status': 'error',
-        'message': 'The token has expired',
-        'error': 'token_expired'
-    }), 401
-
-@jwt.invalid_token_loader
-def invalid_token_callback(error):
-    return jsonify({
-        'status': 'error',
-        'message': 'Signature verification failed',
-        'error': 'invalid_token'
-    }), 401
-
-@jwt.unauthorized_loader
-def missing_token_callback(error):
-    return jsonify({
-        'status': 'error',
-        'message': 'Request does not contain an access token',
-        'error': 'authorization_required'
-    }), 401
-
-# Run the application
-if __name__ == '__main__':
-    app.run(debug="TRUE",host='127.0.0.1', port=5000)
+if __name__ == "__main__":
+    main()
