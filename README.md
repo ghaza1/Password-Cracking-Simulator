@@ -16,7 +16,8 @@
 
 ## 📸 Screenshots  
 <p align="center">
-    <img src="https://via.placeholder.com/500x400?text=Password+Cracking+Simulator" alt="Screenshot Placeholder">
+    ![image](https://github.com/user-attachments/assets/310e551c-f1af-4a02-a339-1a05466384a3)
+
 </p>  
 
 ---
